@@ -40,15 +40,18 @@ public class ZclAttributeTest {
         assertEquals(false, attribute.isWritable());
         assertEquals(false, attribute.isReadable());
         assertEquals(false, attribute.isReportable());
+        assertEquals(false, attribute.isManufacturerSpecific());
         System.out.println(attribute.toString());
 
         attribute = new ZclAttribute(new ZclOnOffCluster(null), 0, "Test Name", ZclDataType.UNSIGNED_8_BIT_INTEGER,
-                true, true, true, true);
+                true, true, true, true, 0x1234);
 
         assertEquals(true, attribute.isMandatory());
         assertEquals(true, attribute.isWritable());
         assertEquals(true, attribute.isReadable());
         assertEquals(true, attribute.isReportable());
+        assertEquals(true, attribute.isManufacturerSpecific());
+        assertEquals(Integer.valueOf(0x1234), attribute.getManufacturerCode());
         System.out.println(attribute.toString());
     }
 

@@ -29,6 +29,11 @@ public class ZclAttribute {
     private ZclCluster cluster;
 
     /**
+     * The manufacturer code of this attribute. If null, the attribute is not manufacturer-specific.
+     */
+    private Integer manufacturerCode;
+
+    /**
      * The attribute identifier field is 16-bits in length and shall contain the
      * identifier of the attribute that the reporting configuration details
      * apply to.
@@ -123,7 +128,7 @@ public class ZclAttribute {
     }
 
     /**
-     * Constructor used to set the static information
+     * Constructor used to set the static information (used for non-manufacturer-specific attribute)
      *
      * @param cluster the {@link ZclCluster} to which the attribute belongs
      * @param id the attribute ID
@@ -143,6 +148,32 @@ public class ZclAttribute {
         this.readable = readable;
         this.writable = writable;
         this.reportable = reportable;
+    }
+
+    /**
+     * Constructor used to set the static information (used for manufacturer-specific attribute)
+     *
+     * @param cluster the {@link ZclCluster} to which the attribute belongs
+     * @param id the attribute ID
+     * @param dataType the {@link ZclDataType} for this attribute
+     * @param mandatory true if this is defined as mandatory in the ZCL specification
+     * @param readable true if this is defined as readable in the ZCL specification
+     * @param writable true if this is defined as writable in the ZCL specification
+     * @param reportable true if this is defined as reportable in the ZCL specification
+     * @param manufacturerCode the manufacturer code
+     */
+    public ZclAttribute(final ZclCluster cluster, final int id, final String name, final ZclDataType dataType,
+            final boolean mandatory, final boolean readable, final boolean writable, final boolean reportable,
+            final Integer manufacturerCode) {
+        this.cluster = cluster;
+        this.id = id;
+        this.name = name;
+        this.dataType = dataType;
+        this.mandatory = mandatory;
+        this.readable = readable;
+        this.writable = writable;
+        this.reportable = reportable;
+        this.manufacturerCode = manufacturerCode;
     }
 
     /**
@@ -181,6 +212,20 @@ public class ZclAttribute {
      */
     public int getId() {
         return id;
+    }
+
+    /**
+     * @return whether this is a manufacturer-specific attribute
+     */
+    public boolean isManufacturerSpecific() {
+        return manufacturerCode != null;
+    }
+
+    /**
+     * @return the manufacturer code of this attribute (null for attributes that are not manufacturer-specific)
+     */
+    public Integer getManufacturerCode() {
+        return manufacturerCode;
     }
 
     /**
@@ -459,6 +504,7 @@ public class ZclAttribute {
         maximumReportingPeriod = dao.getMaximumReportingPeriod();
         reportingChange = dao.getReportingChange();
         reportingTimeout = dao.getReportingTimeout();
+        manufacturerCode = dao.getManufacturerCode();
     }
 
     /**
@@ -484,6 +530,7 @@ public class ZclAttribute {
         dao.setReportingTimeout(reportingTimeout);
         dao.setLastValue(lastValue);
         dao.setLastReportTime(lastReportTime);
+        dao.setManufacturerCode(manufacturerCode);
 
         return dao;
     }

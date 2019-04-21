@@ -20,6 +20,11 @@ import com.zsmartsystems.zigbee.zcl.protocol.ZclDataType;
  */
 public class ZclAttributeDao {
     /**
+     * The manufacturer code of this attribute. If null, the attribute is not manufacturer-specific.
+     */
+    private Integer manufacturerCode;
+
+    /**
      * The attribute identifier field is 16-bits in length and shall contain the
      * identifier of the attribute that the reporting configuration details
      * apply to.
@@ -301,6 +306,14 @@ public class ZclAttributeDao {
      */
     public void setLastValue(Object lastValue) {
         this.lastValue = lastValue;
+    }
+
+    public Integer getManufacturerCode() {
+        return manufacturerCode;
+    }
+
+    public void setManufacturerCode(Integer manufacturerCode) {
+        this.manufacturerCode = manufacturerCode;
     }
 
 }

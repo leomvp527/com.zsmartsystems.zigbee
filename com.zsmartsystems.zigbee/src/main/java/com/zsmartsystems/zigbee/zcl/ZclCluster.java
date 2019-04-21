@@ -7,6 +7,7 @@
  */
 package com.zsmartsystems.zigbee.zcl;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -301,6 +302,17 @@ public abstract class ZclCluster {
         command.setRecords(attributes);
         command.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
 
+        List<Integer> attributeIds = new ArrayList<>();
+        for (WriteAttributeRecord attribute : attributes) {
+            attributeIds.add(attribute.getAttributeIdentifier());
+        }
+
+        if (isManufacturerSpecific()) {
+            command.setManufacturerCode(getManufacturerCode());
+        } else if (areAttributesManufacturerSpecific(attributeIds)) {
+            command.setManufacturerCode(getAttribute(attributeIds.get(0)).getManufacturerCode());
+        }
+
         return send(command);
     }
 
@@ -318,15 +330,22 @@ public abstract class ZclCluster {
      * Read a number of attributes given a list of attribute IDs. Care must be taken not to request too many attributes
      * so as to exceed the allowable frame length
      *
-     * @param attributes List of attribute identifiers to read
+     * @param attributeIds List of attribute identifiers to read
      * @return command future
      */
-    public Future<CommandResult> readAttributes(final List<Integer> attributes) {
+    public Future<CommandResult> readAttributes(final List<Integer> attributeIds) {
         final ReadAttributesCommand command = new ReadAttributesCommand();
 
         command.setClusterId(clusterId);
-        command.setIdentifiers(attributes);
+        command.setIdentifiers(attributeIds);
         command.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
+
+        // TODO: ????? What is this empty check?
+        if (!attributeIds.isEmpty() && isManufacturerSpecific()) {
+            command.setManufacturerCode(getManufacturerCode());
+        } else if (areAttributesManufacturerSpecific(attributeIds)) {
+            command.setManufacturerCode(getAttribute(attributeIds.get(0)).getManufacturerCode());
+        }
 
         return send(command);
     }
@@ -428,8 +447,7 @@ public abstract class ZclCluster {
     /**
      * Gets an attribute from the attribute ID
      *
-     * @param id
-     *            the attribute ID
+     * @param id the attribute ID
      * @return the {@link ZclAttribute}
      */
     public ZclAttribute getAttribute(int id) {
@@ -569,12 +587,32 @@ public abstract class ZclCluster {
      * @param status the {@link ZclStatus} to send in the response
      */
     public void sendDefaultResponse(Integer transactionId, Integer commandIdentifier, ZclStatus status) {
+        sendDefaultResponse(transactionId, commandIdentifier, status, null);
+    }
+
+    /**
+     * Sends a default response to the client
+     *
+     * @param transactionId the transaction ID to use in the response
+     * @param commandIdentifier the command identifier to which this is a response
+     * @param status the {@link ZclStatus} to send in the response
+     * @param manufacturerCode the manufacturer code to set in the response (or null, if the command is not
+     *            manufacturer-specific, or if the cluster is itself manufacturer-specific)
+     */
+    public void sendDefaultResponse(Integer transactionId, Integer commandIdentifier, ZclStatus status,
+            Integer manufacturerCode) {
         DefaultResponse defaultResponse = new DefaultResponse();
         defaultResponse.setTransactionId(transactionId);
         defaultResponse.setCommandIdentifier(commandIdentifier);
         defaultResponse.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
         defaultResponse.setClusterId(clusterId);
         defaultResponse.setStatusCode(status);
+
+        if (isManufacturerSpecific()) {
+            defaultResponse.setManufacturerCode(getManufacturerCode());
+        } else if (manufacturerCode != null) {
+            defaultResponse.setManufacturerCode(manufacturerCode);
+        }
 
         zigbeeEndpoint.sendTransaction(defaultResponse);
     }
@@ -628,6 +666,24 @@ public abstract class ZclCluster {
      * @return {@link Future} returning a {@link Boolean}
      */
     public Future<Boolean> discoverAttributes(final boolean rediscover) {
+        return discoverAttributes(rediscover, null);
+    }
+
+    /**
+     * Discovers the list of attributes supported by the cluster on the remote device.
+     * <p>
+     * If the discovery has already been completed, and rediscover is false, then the future will complete immediately
+     * and the user can use existing results. Normally there should not be a need to set rediscover to true.
+     * <p>
+     * This method returns a future to a boolean. Upon success the caller should call {@link #getSupportedAttributes()}
+     * to get the list of supported attributes or {@link #isAttributeSupported(int)} to test if a single attribute is
+     * supported.
+     *
+     * @param rediscover true to perform a discovery even if it was previously completed
+     * @param manufacturerCode set to non-null value to perform a discovery of manufacturer-specific attributes
+     * @return {@link Future} returning a {@link Boolean}
+     */
+    public Future<Boolean> discoverAttributes(final boolean rediscover, final Integer manufacturerCode) {
         RunnableFuture<Boolean> future = new FutureTask<>(new Callable<Boolean>() {
             @Override
             public Boolean call() throws Exception {
@@ -649,6 +705,12 @@ public abstract class ZclCluster {
                         command.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
                         command.setStartAttributeIdentifier(index);
                         command.setMaximumAttributeIdentifiers(10);
+
+                        if (isManufacturerSpecific()) {
+                            command.setManufacturerCode(getManufacturerCode());
+                        } else if (manufacturerCode != null) {
+                            command.setManufacturerCode(manufacturerCode);
+                        }
 
                         CommandResult result = send(command).get();
                         if (result.isError()) {
@@ -710,11 +772,31 @@ public abstract class ZclCluster {
      * <p>
      * If the discovery has already been completed, and rediscover is false, then the future will complete immediately
      * and the user can use existing results. Normally there should not be a need to set rediscover to true.
+     * <p>
+     * Will not discover manufacturer-specific commands unless the cluster itself is manufacturer-specific.
      *
      * @param rediscover true to perform a discovery even if it was previously completed
      * @return Command future {@link Boolean} with the success of the discovery
      */
     public Future<Boolean> discoverCommandsReceived(final boolean rediscover) {
+        return discoverCommandsReceived(rediscover, null);
+    }
+
+    /**
+     * Discovers the list of commands received by the cluster on the remote device. If the discovery is successful,
+     * users should call {@link ZclCluster#getSupportedCommandsReceived()} to get the list of supported commands.
+     * <p>
+     * If the discovery has already been completed, and rediscover is false, then the future will complete immediately
+     * and the user can use existing results. Normally there should not be a need to set rediscover to true.
+     * <p>
+     * If the cluster is not manufacturer-specific, discovery of manufacturer-specific commands for a specific
+     * manufacturer can be triggered via the method parameter 'manufacturerCode'.
+     *
+     * @param rediscover true to perform a discovery even if it was previously completed
+     * @param manufacturerCode set to non-null value to perform a discovery of manufacturer-specific commands
+     * @return Command future {@link Boolean} with the success of the discovery
+     */
+    public Future<Boolean> discoverCommandsReceived(final boolean rediscover, final Integer manufacturerCode) {
         RunnableFuture<Boolean> future = new FutureTask<>(new Callable<Boolean>() {
             @Override
             public Boolean call() throws Exception {
@@ -736,6 +818,12 @@ public abstract class ZclCluster {
                         command.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
                         command.setStartCommandIdentifier(index);
                         command.setMaximumCommandIdentifiers(20);
+
+                        if (isManufacturerSpecific()) {
+                            command.setManufacturerCode(getManufacturerCode());
+                        } else if (manufacturerCode != null) {
+                            command.setManufacturerCode(manufacturerCode);
+                        }
 
                         CommandResult result = send(command).get();
                         if (result.isError()) {
@@ -794,11 +882,31 @@ public abstract class ZclCluster {
      * <p>
      * If the discovery has already been completed, and rediscover is false, then the future will complete immediately
      * and the user can use existing results. Normally there should not be a need to set rediscover to true.
+     * <p>
+     * Will not discover manufacturer-specific commands unless the cluster itself is manufacturer-specific.
      *
      * @param rediscover true to perform a discovery even if it was previously completed
      * @return Command future {@link Boolean} with the success of the discovery
      */
     public Future<Boolean> discoverCommandsGenerated(final boolean rediscover) {
+        return discoverCommandsGenerated(rediscover, null);
+    }
+
+    /**
+     * Discovers the list of commands generated by the cluster on the remote device If the discovery is successful,
+     * users should call {@link ZclCluster#getSupportedCommandsGenerated()} to get the list of supported commands.
+     * <p>
+     * If the discovery has already been completed, and rediscover is false, then the future will complete immediately
+     * and the user can use existing results. Normally there should not be a need to set rediscover to true.
+     * <p>
+     * If the cluster is not manufacturer-specific, discovery of manufacturer-specific commands for a specific
+     * manufacturer can be triggered via the method parameter 'manufacturerCode'.
+     *
+     * @param rediscover true to perform a discovery even if it was previously completed
+     * @param manufacturerCode set to non-null value to perform a discovery of manufacturer-specific commands
+     * @return Command future {@link Boolean} with the success of the discovery
+     */
+    public Future<Boolean> discoverCommandsGenerated(final boolean rediscover, final Integer manufacturerCode) {
         RunnableFuture<Boolean> future = new FutureTask<>(new Callable<Boolean>() {
             @Override
             public Boolean call() throws Exception {
@@ -819,6 +927,12 @@ public abstract class ZclCluster {
                         command.setDestinationAddress(zigbeeEndpoint.getEndpointAddress());
                         command.setStartCommandIdentifier(index);
                         command.setMaximumCommandIdentifiers(20);
+
+                        if (isManufacturerSpecific()) {
+                            command.setManufacturerCode(getManufacturerCode());
+                        } else if (manufacturerCode != null) {
+                            command.setManufacturerCode(manufacturerCode);
+                        }
 
                         CommandResult result = send(command).get();
                         if (result.isError()) {
@@ -1021,6 +1135,62 @@ public abstract class ZclCluster {
             logger.debug("Error instantiating cluster command {}, id={}", clusterName, commandId);
         }
         return null;
+    }
+
+    /**
+     * Indicates whether this is a manufacturer-specific attribute. Default is not manufacturer-specific.
+     */
+    public boolean isManufacturerSpecific() {
+        return getManufacturerCode() != null;
+    }
+
+    /**
+     * Returns the manufacturer code; must be non-null for manufacturer-specific clusters.
+     */
+    public Integer getManufacturerCode() {
+        return null;
+    }
+
+    /**
+     * Adds additional attributes to the cluster (like, e.g., manufacturer-specific attributes).
+     *
+     * @param attributes a Set of {@link ZclAttribute}
+     */
+    public void addAttributes(Set<ZclAttribute> attributes) {
+        for (ZclAttribute attribute : attributes) {
+            if (isClient()) {
+                clientAttributes.put(attribute.getId(), attribute);
+            } else {
+                serverAttributes.put(attribute.getId(), attribute);
+            }
+        }
+    }
+
+    /**
+     * Adds additional client commands to the cluster (like, e.g., manufacturer-specific commands).
+     *
+     * @param commands
+     */
+    public void addClientCommands(Map<Integer, Class<? extends ZclCommand>> commands) {
+        clientCommands.putAll(commands);
+    }
+
+    /**
+     * Adds additional server commands to the cluster (like, e.g., manufacturer-specific commands).
+     *
+     * @param commands
+     */
+    public void addServerCommands(Map<Integer, Class<? extends ZclCommand>> commands) {
+        serverCommands.putAll(commands);
+    }
+
+    private boolean areAttributesManufacturerSpecific(List<Integer> attributeIds) {
+        for (int attributeId : attributeIds) {
+            if (getAttribute(attributeId) != null && !getAttribute(attributeId).isManufacturerSpecific()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
